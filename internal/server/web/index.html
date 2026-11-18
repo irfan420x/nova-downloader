@@ -87,6 +87,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
       <button id="pasteBtn" class="ghost" title="Read from clipboard">Paste</button>
       <button id="fetchBtn">Fetch</button>
     </div>
+    <p class="muted" style="margin:10px 0 0">Works with YouTube, TikTok, Instagram, Facebook, X, SoundCloud, Pinterest — and 1000+ more sites via yt-dlp.</p>
     <div style="margin-top:10px"><a href="#" id="batchToggle">+ Batch: paste several links at once</a></div>
     <div id="batchBox" style="display:none;margin-top:10px">
       <textarea id="batchUrls" placeholder="One link per line (up to 50)"></textarea>
@@ -215,7 +216,7 @@ function renderProbe(p,append){
     const vonly=(p.video_only||[]).slice(0,8).map(f=>fmtRadio(f,g+"v",false)).join("");
     const aonly=(p.audio_only||[]).slice(0,6).map(f=>fmtRadio(f,g+"a",false)).join("");
     div.innerHTML=`<div class="probe" style="margin-top:14px">
-      ${p.thumbnail?`<img src="${esc(p.thumbnail)}" alt="">`:""}
+      ${p.thumbnail?`<img src="${esc(p.thumbnail)}" alt="" onerror="this.style.display='none'">`:""}
       <div class="info"><p class="title">${esc(p.title)}</p>
       <p class="muted">${esc(p.uploader||"")}${p.duration?" · "+fmtDur(p.duration):""}</p></div></div>
       <div class="grp">Video + audio — pick a quality</div>${comb||'<p class="muted">No combined formats.</p>'}

@@ -34,6 +34,33 @@ no ads, no trackers, no account.
 - **Private by design** — the UI is a page served on `127.0.0.1` only.
   Nothing leaves your machine except the downloads you ask for.
 
+## Platforms
+
+Tested 2026-11-19 with yt-dlp 2026.10.26. Results can vary by network and
+IP — a site that fails here may work from your connection, and engine
+updates can change this table. Update yt-dlp from Settings for the newest
+extractors.
+
+| Platform | Status |
+| --- | --- |
+| YouTube | ✅ Works (bot-check is intermittent from datacentre IPs — `cookies.txt` in Settings fixes it) |
+| TikTok | ✅ Works |
+| Instagram | ✅ Works |
+| Facebook | ✅ Works (reels serve a single format, so quality choice is limited) |
+| X / Twitter | ✅ Works |
+| SoundCloud | ✅ Works |
+| Pinterest | ✅ Works |
+| Vimeo | 🔒 Needs login — public videos currently ask for `cookies.txt` in Settings |
+| Dailymotion | ⚠️ IP-dependent — failed from this network ("Remote end closed connection without response") |
+| Twitch | ⚠️ IP-dependent — failed from this network |
+| Reddit | ⚠️ IP-dependent — truncated responses from this network |
+| Threads | ❌ Not supported by the engine yet — no Threads extractor in yt-dlp 2026.10.26 ("Unsupported URL") |
+
+Any other public link still goes through yt-dlp's 1000+ supported sites,
+plus any direct file / image / document link via the built-in downloader.
+When a probe fails, the app now shows a short hint with the error
+(login / network / unsupported) telling you what to try next.
+
 ## Install
 
 ### Download (recommended)
@@ -101,7 +128,24 @@ queue ──▶ worker (max 2) ──▶ yt-dlp --continue / HTTP Range resume
   No Node, no Electron, no CGO — the whole app is one ~11 MB binary.
 - **Stdlib only:** the Go code uses no third-party packages.
 
-## Verified (v1.0.0, 2026-11-19, on Linux)
+## Verified (v1.1.0, 2026-11-19, on Linux)
+
+Unit + race tests: `go test -race ./...` — all packages pass.
+
+Platform probe (12 sites, yt-dlp 2026.10.26, this VM): 7 work —
+YouTube, TikTok, Instagram, Facebook, X, SoundCloud, Pinterest. Vimeo
+needs login/cookies. Dailymotion, Twitch and Reddit fail from this
+network (transport / truncated responses). Threads has no extractor in
+the engine yet ("Unsupported URL"). Full report:
+`platform-probe-2026-11-19.md`.
+
+Live, against the real app:
+
+| Check | Result |
+| --- | --- |
+| Platform probe (12 sites) | ✅ 7 work, 1 needs login, 3 IP-dependent, 1 unsupported by engine |
+| TikTok end-to-end download | ✅ 4,452,152 B mp4 in ~3 s, valid MP4 |
+| Vimeo probe error hint | ✅ error now carries "Hint: this site needs login — add your cookies.txt in Settings and try again." |
 
 Unit + race tests: `go test -race ./...` — all packages pass.
 

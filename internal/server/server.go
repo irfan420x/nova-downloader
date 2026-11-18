@@ -263,6 +263,47 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// probeErrorHint classifies a yt-dlp probe failure and returns a short
+// plain-English hint for the user, or "" when the error speaks for itself.
+// Login problems (site wants an account/cookies), network problems (the
+// site could not be reached from this network) and unsupported links
+// (no extractor in the current engine) each get their own hint.
+func probeErrorHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "login"),
+		strings.Contains(msg, "logged-in"),
+		strings.Contains(msg, "logged in"),
+		strings.Contains(msg, "sign in"),
+		strings.Contains(msg, "not a bot"),
+		strings.Contains(msg, "cookies"):
+		return "Hint: this site needs login — add your cookies.txt in Settings and try again."
+	case strings.Contains(msg, "unsupported url"):
+		return "Hint: this link is not supported by the current engine — update yt-dlp from Settings and try again."
+	case strings.Contains(msg, "remote end closed"),
+		strings.Contains(msg, "connection reset"),
+		strings.Contains(msg, "incompleteread"),
+		strings.Contains(msg, "transport"),
+		strings.Contains(msg, "network"),
+		strings.Contains(msg, "timed out"):
+		return "Hint: the site could not be reached from this network — try again later, or add cookies.txt in Settings."
+	default:
+		return ""
+	}
+}
+
+// withProbeHint appends the classification hint (if any) to a probe error,
+// keeping the raw error text first so the original detail is never lost.
+func withProbeHint(err error) error {
+	if hint := probeErrorHint(err); hint != "" {
+		return fmt.Errorf("%w. %s", err, hint)
+	}
+	return err
+}
+
 func (s *Server) probeURL(ctx context.Context, rawURL string) (*probeResp, error) {
 	kind, head, _ := detect.Classify(rawURL)
 	if kind == detect.KindFile && head != nil {
@@ -293,7 +334,7 @@ func (s *Server) probeURL(ctx context.Context, rawURL string) (*probeResp, error
 				}, nil
 			}
 		}
-		return nil, err
+		return nil, withProbeHint(err)
 	}
 	if info.IsPlaylist() {
 		return &probeResp{
