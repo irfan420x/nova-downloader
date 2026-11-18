@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOVA Downloader</title>
+<style>
+:root{
+  --bg:#0A0C1C; --card:#14172B; --card2:#1B1F3A; --line:#262B4A;
+  --text:#E7EAF6; --muted:#9AA3C7; --violet:#8B5CF6; --violet2:#7C3AED;
+  --blue:#3B82F6; --cyan:#22D3EE; --pink:#EC4899; --green:#22C55E; --red:#EF4444; --amber:#F59E0B;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--cyan)}
+header{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);
+  background:linear-gradient(135deg,#14172B,#0A0C1C 60%)}
+.logo{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:22px;
+  background:linear-gradient(135deg,var(--violet2),var(--blue));box-shadow:0 4px 18px rgba(139,92,246,.45)}
+header h1{font-size:20px;margin:0;letter-spacing:.3px}
+header h1 span{background:linear-gradient(90deg,var(--violet),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
+header p{margin:0;color:var(--muted);font-size:13px}
+#engineBadge{margin-left:auto;font-size:13px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card)}
+#engineBadge.ok{border-color:var(--green);color:var(--green)}
+#engineBadge.bad{border-color:var(--amber);color:var(--amber)}
+main{max-width:880px;margin:0 auto;padding:20px 16px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px}
+.card h2{font-size:15px;margin:0 0 12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.row{display:flex;gap:10px}
+input[type=text],input[type=url],textarea,select{flex:1;background:var(--card2);border:1px solid var(--line);
+  color:var(--text);border-radius:10px;padding:11px 12px;font-size:15px;outline:none}
+input:focus,textarea:focus{border-color:var(--violet)}
+textarea{min-height:90px;resize:vertical;font-family:inherit}
+button{border:0;border-radius:10px;padding:11px 18px;font-size:15px;font-weight:600;cursor:pointer;color:#fff;
+  background:linear-gradient(135deg,var(--violet2),var(--blue))}
+button:hover{filter:brightness(1.15)}
+button.ghost{background:var(--card2);border:1px solid var(--line);color:var(--text)}
+button.small{padding:6px 12px;font-size:13px}
+button.danger{background:var(--red)}
+button:disabled{opacity:.5;cursor:default}
+.muted{color:var(--muted);font-size:13px}
+#status{margin-top:10px;font-size:14px;min-height:20px}
+#status.err{color:var(--red)} #status.ok{color:var(--green)}
+.probe{display:flex;gap:14px}
+.probe img{width:168px;height:94px;object-fit:cover;border-radius:10px;background:#000}
+.probe .info{flex:1;min-width:0}
+.probe .title{font-weight:700;font-size:16px;margin:0 0 4px}
+.fmt{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0;display:flex;gap:10px;align-items:center;cursor:pointer}
+.fmt:hover{border-color:var(--violet)}
+.fmt input{accent-color:var(--violet)}
+.fmt .lbl{flex:1}
+.fmt .size{color:var(--muted);font-size:13px}
+.grp{font-size:13px;color:var(--cyan);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}
+.opts{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;font-size:14px}
+.opts label{display:flex;gap:6px;align-items:center}
+.opts input{accent-color:var(--violet)}
+.job{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:var(--card2)}
+.job .top{display:flex;gap:10px;align-items:center}
+.job .t{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.job .st{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--card);color:var(--muted)}
+.job .st.downloading{color:var(--cyan)} .job .st.done{color:var(--green)}
+.job .st.failed{color:var(--red)} .job .st.paused{color:var(--amber)}
+.bar{height:8px;background:var(--bg);border-radius:99px;margin:10px 0 6px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--violet2),var(--cyan));border-radius:99px;transition:width .3s}
+.job .meta{font-size:13px;color:var(--muted)}
+.job .acts{display:flex;gap:8px;margin-top:8px}
+.entry{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.entry:last-child{border-bottom:0}
+.entry input{accent-color:var(--violet)}
+.entry .et{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.settings{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.settings label{font-size:13px;color:var(--muted)}
+.settings input{flex:2;min-width:220px}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">⬇</div>
+  <div><h1>NOVA <span>Downloader</span></h1><p>Paste any public link — pick a quality — download. No ads, no trackers.</p></div>
+  <div id="engineBadge">engine…</div>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <input id="url" type="url" placeholder="Paste a link — YouTube, Vimeo, TikTok, or any file / image URL…" autocomplete="off">
+      <button id="pasteBtn" class="ghost" title="Read from clipboard">Paste</button>
+      <button id="fetchBtn">Fetch</button>
+    </div>
+    <div style="margin-top:10px"><a href="#" id="batchToggle">+ Batch: paste several links at once</a></div>
+    <div id="batchBox" style="display:none;margin-top:10px">
+      <textarea id="batchUrls" placeholder="One link per line (up to 50)"></textarea>
+      <div style="margin-top:8px"><button id="batchBtn">Fetch all</button></div>
+    </div>
+    <div id="status"></div>
+    <div id="probe"></div>
+  </div>
+
+  <div class="card">
+    <h2>Downloads</h2>
+    <div id="jobs"><p class="muted">Nothing yet — paste a link above.</p></div>
+    <div style="margin-top:8px"><button id="clearBtn" class="ghost small">Clear finished</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Settings</h2>
+    <div class="settings">
+      <label>Save to</label><input id="outDir" type="text">
+      <label>At once</label>
+      <select id="maxC"><option>1</option><option>2</option><option>3</option><option>4</option></select>
+      <button id="saveSettings" class="small">Save</button>
+    </div>
+    <div class="settings" style="margin-top:10px">
+      <label>Cookies file</label><input id="cookiesFile" type="text" placeholder="Optional: path to cookies.txt (for YouTube bot-check / age-gated videos)">
+    </div>
+    <p class="muted" style="margin:6px 0 0">Export cookies.txt from your browser (extension “Get cookies.txt”) when YouTube asks to sign in — the app passes it to yt-dlp. Leave empty if videos work without it.</p>
+    <p class="muted" id="engineNote" style="margin:10px 0 0"></p>
+  </div>
+</main>
+<footer>NOVA Downloader · local only — this page never leaves your machine · engine: yt-dlp (video sites) + built-in HTTP (files)</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const fmtSize=b=>{if(!b)return"";const u=["B","KB","MB","GB"];let i=0;while(b>=1024&&i<u.length-1){b/=1024;i++}return b.toFixed(1)+" "+u[i]};
+const fmtDur=s=>{if(!s)return"";s=Math.round(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")};
+let lastProbe=null;
+
+async function api(path,body){
+  const r=await fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||("HTTP "+r.status));
+  return j;
+}
+function setStatus(msg,cls){const el=$("status");el.textContent=msg;el.className=cls||""}
+
+async function refreshStatus(){
+  try{
+    const s=await api("/api/status");
+    const b=$("engineBadge");
+    if(s.engine_path){b.textContent="yt-dlp "+(s.engine_version||"ready")+(s.ffmpeg?" · ffmpeg":"");b.className="ok";}
+    else{b.textContent="yt-dlp missing — video needs engine";b.className="bad";}
+    $("engineNote").textContent=s.engine_path
+      ?"Engine: "+s.engine_path+(s.ffmpeg?" · ffmpeg found (mp3 + subtitles work)":" · ffmpeg not found (mp3 extraction needs ffmpeg)")
+      :"Video downloads need the yt-dlp engine. "+(s.engine_path?"":"Click below to download it (one click, official release).");
+    if(!s.engine_path){
+      $("engineNote").innerHTML='Video downloads need the yt-dlp engine. <button class="small" onclick="downloadEngine()">Download yt-dlp</button> <span id="engProg"></span>';
+    }
+    if(!$("outDir").value){$("outDir").value=s.out_dir;$("maxC").value=String(s.max_concurrent);}
+  }catch(e){/* server down */}
+  try{
+    const st=await api("/api/settings");
+    if(st.cookies_file) $("cookiesFile").value=st.cookies_file;
+  }catch(e){/* ignore */}
+}
+async function downloadEngine(){
+  const p=$("engProg"); if(p)p.textContent="downloading…";
+  try{
+    const r=await fetch("/api/engine/download",{method:"POST"});
+    const t=await r.text();
+    if(t.includes("done ")){if(p)p.textContent="installed ✓";refreshStatus();}
+    else if(p)p.textContent=t;
+  }catch(e){if(p)p.textContent="failed: "+e.message}
+}
+
+$("pasteBtn").onclick=async()=>{
+  try{const t=await navigator.clipboard.readText();if(t){$("url").value=t.trim();$("url").focus();}}
+  catch(e){setStatus("Clipboard blocked by the browser — paste with Ctrl+V instead.","err")}
+};
+$("fetchBtn").onclick=async()=>{
+  const u=$("url").value.trim(); if(!u){setStatus("Paste a link first.","err");return}
+  setStatus("Fetching…"); $("probe").innerHTML="";
+  try{const p=await api("/api/probe",{url:u}); lastProbe=p; renderProbe(p); setStatus("","ok");}
+  catch(e){setStatus(e.message,"err")}
+};
+$("url").addEventListener("keydown",e=>{if(e.key==="Enter")$("fetchBtn").click()});
+$("batchToggle").onclick=e=>{e.preventDefault();const b=$("batchBox");b.style.display=b.style.display==="none"?"block":"none"};
+$("batchBtn").onclick=async()=>{
+  const urls=$("batchUrls").value.split("\n").map(s=>s.trim()).filter(Boolean);
+  if(!urls.length){setStatus("Paste at least one link.","err");return}
+  setStatus("Fetching "+urls.length+" links…");
+  try{
+    const r=await api("/api/batch",{urls});
+    $("probe").innerHTML="";
+    r.results.forEach(p=>{renderProbe(p,true)});
+    if(r.errors.length) setStatus(r.errors.length+" failed: "+r.errors.join(" | "),"err");
+    else setStatus(r.results.length+" links ready — pick a quality per item, then queue each.","ok");
+  }catch(e){setStatus(e.message,"err")}
+};
+
+function fmtRadio(f,group,checked){
+  return `<label class="fmt"><input type="radio" name="${group}" value="${f.format_id}" ${checked?"checked":""} data-note="${(f.format_note||"")}" data-label="${esc(f.height?f.height+"p":"")}">
+    <span class="lbl">${f.height?f.height+"p":"audio"}${f.fps?" "+Math.round(f.fps)+"fps":""} · ${f.ext}${f.format_note?" · "+esc(f.format_note):""}</span>
+    <span class="size">${f.filesize||f.filesize_approx?fmtSize(f.filesize||f.filesize_approx):"size ?"}</span></label>`;
+}
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;")}
+
+function renderProbe(p,append){
+  const box=$("probe");
+  const div=document.createElement("div");
+  if(p.kind==="file"){
+    div.innerHTML=`<div class="probe" style="margin-top:14px"><div class="info">
+      <p class="title">${esc(p.title||p.filename)}</p>
+      <p class="muted">${esc(p.content_type||"file")}${p.size?" · "+fmtSize(p.size):""}</p>
+      <button onclick="queueFile(this)">Download</button>
+      </div></div>`;
+    div.dataset.probe=JSON.stringify(p);
+  } else if(p.kind==="playlist"){
+    const items=(p.entries||[]).map((e,i)=>`<label class="entry"><input type="checkbox" checked data-url="${esc(e.url)}" data-title="${esc(e.title||e.id)}"><span class="et">${esc(e.title||e.id)}</span></label>`).join("");
+    div.innerHTML=`<div style="margin-top:14px"><p class="title">Playlist: ${esc(p.title||"")}</p>
+      <p class="muted">${(p.entries||[]).length} videos</p>${items}
+      <div style="margin-top:10px"><button onclick="queuePlaylist(this)">Queue selected (best quality)</button></div></div>`;
+  } else {
+    const g="g"+Math.random().toString(36).slice(2,7);
+    const comb=(p.combined||[]).map((f,i)=>fmtRadio(f,g+"c",i===0)).join("");
+    const vonly=(p.video_only||[]).slice(0,8).map(f=>fmtRadio(f,g+"v",false)).join("");
+    const aonly=(p.audio_only||[]).slice(0,6).map(f=>fmtRadio(f,g+"a",false)).join("");
+    div.innerHTML=`<div class="probe" style="margin-top:14px">
+      ${p.thumbnail?`<img src="${esc(p.thumbnail)}" alt="">`:""}
+      <div class="info"><p class="title">${esc(p.title)}</p>
+      <p class="muted">${esc(p.uploader||"")}${p.duration?" · "+fmtDur(p.duration):""}</p></div></div>
+      <div class="grp">Video + audio — pick a quality</div>${comb||'<p class="muted">No combined formats.</p>'}
+      ${vonly?`<div class="grp">Video only (no sound)</div>${vonly}`:""}
+      ${aonly?`<div class="grp">Audio only</div>${aonly}`:""}
+      <div class="opts">
+        <label><input type="checkbox" id="sub-${g}"> Subtitles</label>
+        <label><input type="checkbox" id="mp3-${g}"> Audio only (mp3)</label>
+      </div>
+      <button onclick='queueVideo(this,"${g}")'>Add to queue</button>`;
+    div.dataset.probe=JSON.stringify(p);
+  }
+  if(append) box.appendChild(div); else {box.innerHTML="";box.appendChild(div);}
+}
+
+function selectedFmt(div,group){
+  const el=div.querySelector(`input[name="${group}"]:checked`);
+  if(!el) return null;
+  const lbl=el.closest(".fmt").querySelector(".lbl").textContent.trim();
+  return {id:el.value,note:lbl};
+}
+window.queueFile=function(btn){
+  const probe=JSON.parse(btn.closest("[data-probe]").dataset.probe);
+  queueOne({url:probe.url,kind:"file",title:probe.title,filename:probe.filename});
+};
+window.queueVideo=function(btn,g){
+  const container=btn.closest("[data-probe]");
+  const probe=JSON.parse(container.dataset.probe);
+  const c=selectedFmt(container,g+"c"), v=selectedFmt(container,g+"v"), a=selectedFmt(container,g+"a");
+  const pick=c||v||a;
+  const mp3=container.querySelector("#mp3-"+g)?.checked;
+  const subs=container.querySelector("#sub-"+g)?.checked;
+  queueOne({url:probe.url,kind:"video",title:probe.title,
+    format_id:mp3?"bestaudio":(pick?pick.id:""),format_note:mp3?"mp3 audio":(pick?pick.note:"best"),
+    audio_only:!!mp3,subtitles:!!subs,sub_langs:"en,bn"});
+};
+window.queuePlaylist=function(btn){
+  const box=btn.closest("div");
+  box.parentElement.querySelectorAll("input[type=checkbox]:checked").forEach(cb=>{
+    queueOne({url:cb.dataset.url,kind:"video",title:cb.dataset.title,format_id:"",format_note:"best"});
+  });
+};
+async function queueOne(j){
+  try{await api("/api/queue",j);setStatus("Queued: "+(j.title||j.url),"ok");refreshJobs();}
+  catch(e){setStatus(e.message,"err")}
+}
+
+async function refreshJobs(){
+  try{
+    const jobs=await api("/api/jobs");
+    const box=$("jobs");
+    if(!jobs.length){box.innerHTML='<p class="muted">Nothing yet — paste a link above.</p>';return}
+    box.innerHTML=jobs.map(j=>{
+      const pct=Math.round(j.percent||0);
+      const acts=[];
+      if(j.status==="downloading"||j.status==="queued") acts.push(`<button class="ghost small" onclick="jobAction('${j.id}','pause')">Pause</button>`);
+      if(j.status==="paused"||j.status==="failed") acts.push(`<button class="small" onclick="jobAction('${j.id}','resume')">Resume</button>`);
+      if(j.status!=="done"&&j.status!=="cancelled") acts.push(`<button class="danger small" onclick="jobAction('${j.id}','cancel')">Cancel</button>`);
+      return `<div class="job"><div class="top"><span class="t" title="${esc(j.url)}">${esc(j.title||j.filename||j.url)}</span>
+        <span class="st ${j.status}">${j.status}</span></div>
+        <div class="bar"><i style="width:${pct}%"></i></div>
+        <div class="meta">${pct}%${j.total_bytes?" · "+fmtSize(j.done_bytes)+" / "+fmtSize(j.total_bytes):""}${j.speed?" · "+esc(j.speed):""}${j.eta?" · ETA "+esc(j.eta):""}${j.format_note?" · "+esc(j.format_note):""}${j.error?" · "+esc(j.error):""}</div>
+        <div class="acts">${acts.join("")}</div></div>`;
+    }).join("");
+  }catch(e){/* ignore while polling */}
+}
+window.jobAction=async(id,act)=>{try{await api("/api/jobs/"+id+"/"+act,{});refreshJobs()}catch(e){setStatus(e.message,"err")}};
+$("clearBtn").onclick=async()=>{await api("/api/jobs/clear-finished",{});refreshJobs()};
+$("saveSettings").onclick=async()=>{
+  try{await api("/api/settings",{out_dir:$("outDir").value.trim(),max_concurrent:parseInt($("maxC").value,10),
+      cookies_file:$("cookiesFile").value.trim()});
+    setStatus("Settings saved.","ok");refreshStatus();}
+  catch(e){setStatus(e.message,"err")}
+};
+refreshStatus(); refreshJobs();
+setInterval(refreshJobs,1000);
+setInterval(refreshStatus,10000);
+</script>
+</body>
+</html>

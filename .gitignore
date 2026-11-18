@@ -1,0 +1,9 @@
+# Binaries and local engine
+nova-downloader
+nova-downloader-*
+bin/
+*.part
+*.tmp
+
+# Test / live-test artefacts
+/tmp/
