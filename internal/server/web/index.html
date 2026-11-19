@@ -83,11 +83,11 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
 <main>
   <div class="card">
     <div class="row">
-      <input id="url" type="url" placeholder="Paste a link — YouTube, Vimeo, TikTok, or any file / image URL…" autocomplete="off">
+      <input id="url" type="url" placeholder="Paste a link — YouTube, TikTok, Facebook, X, SoundCloud, or any file URL…" autocomplete="off">
       <button id="pasteBtn" class="ghost" title="Read from clipboard">Paste</button>
       <button id="fetchBtn">Fetch</button>
     </div>
-    <p class="muted" style="margin:10px 0 0">Works with YouTube, TikTok, Instagram, Facebook, X, SoundCloud, Pinterest — and 1000+ more sites via yt-dlp.</p>
+    <p class="muted" style="margin:10px 0 0">Works with YouTube, TikTok, Facebook, X, SoundCloud via the NOVA API — plus Instagram, Pinterest and 1000+ more sites via the yt-dlp fallback.</p>
     <div style="margin-top:10px"><a href="#" id="batchToggle">+ Batch: paste several links at once</a></div>
     <div id="batchBox" style="display:none;margin-top:10px">
       <textarea id="batchUrls" placeholder="One link per line (up to 50)"></textarea>
@@ -115,16 +115,22 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
       <label>Cookies file</label><input id="cookiesFile" type="text" placeholder="Optional: path to cookies.txt (for YouTube bot-check / age-gated videos)">
     </div>
     <p class="muted" style="margin:6px 0 0">Export cookies.txt from your browser (extension “Get cookies.txt”) when YouTube asks to sign in — the app passes it to yt-dlp. Leave empty if videos work without it.</p>
+    <div class="settings" style="margin-top:10px">
+      <label>API URL</label><input id="apiUrl" type="text" placeholder="https://nova-downloader-api.vercel.app">
+    </div>
+    <p class="muted" style="margin:6px 0 0">The NOVA API resolves YouTube, TikTok, Facebook, X, SoundCloud, direct files and HLS. Leave the default unless you self-host the API.</p>
     <p class="muted" id="engineNote" style="margin:10px 0 0"></p>
   </div>
 </main>
-<footer>NOVA Downloader · local only — this page never leaves your machine · engine: yt-dlp (video sites) + built-in HTTP (files)</footer>
+<footer>NOVA Downloader · local only — this page never leaves your machine · engine: NOVA API (YouTube, TikTok, Facebook, X, SoundCloud, files, HLS) + yt-dlp fallback (Instagram, Pinterest, 1000+ sites)</footer>
 
 <script>
 const $=id=>document.getElementById(id);
 const fmtSize=b=>{if(!b)return"";const u=["B","KB","MB","GB"];let i=0;while(b>=1024&&i<u.length-1){b/=1024;i++}return b.toFixed(1)+" "+u[i]};
 const fmtDur=s=>{if(!s)return"";s=Math.round(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")};
 let lastProbe=null;
+let ffmpegOK=false;
+function isAPIHost(u){try{const h=new URL(u).hostname.toLowerCase();return /(^|\.)(youtube\.com|youtu\.be|music\.youtube\.com|tiktok\.com|facebook\.com|fb\.watch|x\.com|twitter\.com|soundcloud\.com)$/.test(h)||u.toLowerCase().includes(".m3u8")}catch(e){return false}}
 
 async function api(path,body){
   const r=await fetch(path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
@@ -137,16 +143,19 @@ function setStatus(msg,cls){const el=$("status");el.textContent=msg;el.className
 async function refreshStatus(){
   try{
     const s=await api("/api/status");
+    ffmpegOK=!!s.ffmpeg;
     const b=$("engineBadge");
-    if(s.engine_path){b.textContent="yt-dlp "+(s.engine_version||"ready")+(s.ffmpeg?" · ffmpeg":"");b.className="ok";}
-    else{b.textContent="yt-dlp missing — video needs engine";b.className="bad";}
-    $("engineNote").textContent=s.engine_path
-      ?"Engine: "+s.engine_path+(s.ffmpeg?" · ffmpeg found (mp3 + subtitles work)":" · ffmpeg not found (mp3 extraction needs ffmpeg)")
-      :"Video downloads need the yt-dlp engine. "+(s.engine_path?"":"Click below to download it (one click, official release).");
+    const apiBit=s.api_ok?"NOVA API ✓":"NOVA API ✗";
+    if(s.engine_path){b.textContent=apiBit+" · yt-dlp "+(s.engine_version||"ready")+(s.ffmpeg?" · ffmpeg":"");b.className=s.api_ok?"ok":"bad";}
+    else{b.textContent=apiBit+" · yt-dlp missing (fallback off)";b.className="bad";}
+    $("engineNote").textContent="API: "+(s.api_url||"")+(s.api_ok?" (reachable)":" (UNREACHABLE"+(s.api_error?" — "+s.api_error:"")+")")
+      +(s.engine_path?" · Fallback engine: "+s.engine_path+(s.ffmpeg?" · ffmpeg found (mp3 + merge work)":" · ffmpeg not found (mp3/merge need ffmpeg)")
+      :" · Video fallback needs the yt-dlp engine.");
     if(!s.engine_path){
-      $("engineNote").innerHTML='Video downloads need the yt-dlp engine. <button class="small" onclick="downloadEngine()">Download yt-dlp</button> <span id="engProg"></span>';
+      $("engineNote").innerHTML='Video fallback needs the yt-dlp engine. <button class="small" onclick="downloadEngine()">Download yt-dlp</button> <span id="engProg"></span>';
     }
     if(!$("outDir").value){$("outDir").value=s.out_dir;$("maxC").value=String(s.max_concurrent);}
+    if(!$("apiUrl").value&&s.api_url){$("apiUrl").value=s.api_url;}
   }catch(e){/* server down */}
   try{
     const st=await api("/api/settings");
@@ -169,7 +178,7 @@ $("pasteBtn").onclick=async()=>{
 };
 $("fetchBtn").onclick=async()=>{
   const u=$("url").value.trim(); if(!u){setStatus("Paste a link first.","err");return}
-  setStatus("Fetching…"); $("probe").innerHTML="";
+  setStatus(isAPIHost(u)?"Resolving via NOVA API… (first call can take up to a minute while the API wakes up)":"Fetching via yt-dlp fallback…"); $("probe").innerHTML="";
   try{const p=await api("/api/probe",{url:u}); lastProbe=p; renderProbe(p); setStatus("","ok");}
   catch(e){setStatus(e.message,"err")}
 };
@@ -198,34 +207,35 @@ function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"
 function renderProbe(p,append){
   const box=$("probe");
   const div=document.createElement("div");
+  const engineLbl=p.engine==="api"?"Resolved via NOVA API":p.engine==="ytdlp"?"Resolved via yt-dlp (fallback)":"Direct download";
   if(p.kind==="file"){
     div.innerHTML=`<div class="probe" style="margin-top:14px"><div class="info">
       <p class="title">${esc(p.title||p.filename)}</p>
-      <p class="muted">${esc(p.content_type||"file")}${p.size?" · "+fmtSize(p.size):""}</p>
+      <p class="muted">${esc(p.content_type||"file")}${p.size?" · "+fmtSize(p.size):""} · ${engineLbl}${p.platform?" · "+esc(p.platform):""}</p>
       <button onclick="queueFile(this)">Download</button>
       </div></div>`;
     div.dataset.probe=JSON.stringify(p);
   } else if(p.kind==="playlist"){
     const items=(p.entries||[]).map((e,i)=>`<label class="entry"><input type="checkbox" checked data-url="${esc(e.url)}" data-title="${esc(e.title||e.id)}"><span class="et">${esc(e.title||e.id)}</span></label>`).join("");
     div.innerHTML=`<div style="margin-top:14px"><p class="title">Playlist: ${esc(p.title||"")}</p>
-      <p class="muted">${(p.entries||[]).length} videos</p>${items}
+      <p class="muted">${(p.entries||[]).length} videos · ${engineLbl}</p>${items}
       <div style="margin-top:10px"><button onclick="queuePlaylist(this)">Queue selected (best quality)</button></div></div>`;
   } else {
     const g="g"+Math.random().toString(36).slice(2,7);
     const comb=(p.combined||[]).map((f,i)=>fmtRadio(f,g+"c",i===0)).join("");
     const vonly=(p.video_only||[]).slice(0,8).map(f=>fmtRadio(f,g+"v",false)).join("");
     const aonly=(p.audio_only||[]).slice(0,6).map(f=>fmtRadio(f,g+"a",false)).join("");
+    const opts=[];
+    if(p.subtitles_supported) opts.push(`<label><input type="checkbox" id="sub-${g}"> Subtitles</label>`);
+    if(ffmpegOK) opts.push(`<label><input type="checkbox" id="mp3-${g}"> Audio only (mp3)</label>`);
     div.innerHTML=`<div class="probe" style="margin-top:14px">
       ${p.thumbnail?`<img src="${esc(p.thumbnail)}" alt="" onerror="this.style.display='none'">`:""}
       <div class="info"><p class="title">${esc(p.title)}</p>
-      <p class="muted">${esc(p.uploader||"")}${p.duration?" · "+fmtDur(p.duration):""}</p></div></div>
+      <p class="muted">${esc(p.uploader||"")}${p.duration?" · "+fmtDur(p.duration):""} · ${engineLbl}${p.platform?" · "+esc(p.platform):""}</p></div></div>
       <div class="grp">Video + audio — pick a quality</div>${comb||'<p class="muted">No combined formats.</p>'}
-      ${vonly?`<div class="grp">Video only (no sound)</div>${vonly}`:""}
+      ${vonly?`<div class="grp">Video only — merged with best audio when ffmpeg is available</div>${vonly}`:""}
       ${aonly?`<div class="grp">Audio only</div>${aonly}`:""}
-      <div class="opts">
-        <label><input type="checkbox" id="sub-${g}"> Subtitles</label>
-        <label><input type="checkbox" id="mp3-${g}"> Audio only (mp3)</label>
-      </div>
+      ${opts.length?`<div class="opts">${opts.join("")}</div>`:""}
       <button onclick='queueVideo(this,"${g}")'>Add to queue</button>`;
     div.dataset.probe=JSON.stringify(p);
   }
@@ -238,9 +248,16 @@ function selectedFmt(div,group){
   const lbl=el.closest(".fmt").querySelector(".lbl").textContent.trim();
   return {id:el.value,note:lbl};
 }
+function findFmt(probe,id){for(const k of ["combined","video_only","audio_only"]){for(const f of (probe[k]||[])){if(f.format_id===id)return f}}return null}
+function streamFields(f){
+  if(!f||!f.stream_url) return {};
+  return {stream_url:f.stream_url,stream_headers:f.stream_headers||{},stream_ext:f.ext||"",alternates:f.alternates||[]};
+}
 window.queueFile=function(btn){
   const probe=JSON.parse(btn.closest("[data-probe]").dataset.probe);
-  queueOne({url:probe.url,kind:"file",title:probe.title,filename:probe.filename});
+  const s=(probe.streams&&probe.streams[0])||{};
+  queueOne(Object.assign({url:probe.url,kind:"file",title:probe.title,filename:probe.filename,
+    engine:probe.engine||"file",platform:probe.platform||""},streamFields(s)));
 };
 window.queueVideo=function(btn,g){
   const container=btn.closest("[data-probe]");
@@ -249,14 +266,38 @@ window.queueVideo=function(btn,g){
   const pick=c||v||a;
   const mp3=container.querySelector("#mp3-"+g)?.checked;
   const subs=container.querySelector("#sub-"+g)?.checked;
-  queueOne({url:probe.url,kind:"video",title:probe.title,
-    format_id:mp3?"bestaudio":(pick?pick.id:""),format_note:mp3?"mp3 audio":(pick?pick.note:"best"),
-    audio_only:!!mp3,subtitles:!!subs,sub_langs:"en,bn"});
+  const audioBest=(probe.audio_only||[])[0]||null;
+  const base={url:probe.url,kind:"video",title:probe.title,
+    engine:probe.engine||"ytdlp",platform:probe.platform||"",
+    subtitles:!!subs,sub_langs:"en,bn"};
+  if(probe.engine==="api"){
+    if(mp3&&audioBest){
+      queueOne(Object.assign(base,{format_id:audioBest.format_id,format_note:"mp3 audio",
+        audio_only:true},streamFields(audioBest)));
+      return;
+    }
+    const pickFmt=pick?findFmt(probe,pick.id):null;
+    const isVideoOnly=pickFmt&&pickFmt.acodec==="none";
+    const payload=Object.assign(base,{format_id:pick?pick.id:"",format_note:pick?pick.note:"best"},
+      streamFields(pickFmt));
+    if(isVideoOnly&&audioBest){
+      // Video-only pick: also fetch best audio so the runner can
+      // merge with ffmpeg (video alone when ffmpeg is missing).
+      payload.merged=true;
+      payload.audio_stream_url=audioBest.stream_url;
+      payload.audio_stream_headers=audioBest.stream_headers||{};
+      payload.audio_stream_ext=audioBest.ext||"";
+    }
+    queueOne(payload);
+    return;
+  }
+  queueOne(Object.assign(base,{format_id:mp3?"bestaudio":(pick?pick.id:""),format_note:mp3?"mp3 audio":(pick?pick.note:"best"),
+    audio_only:!!mp3}));
 };
 window.queuePlaylist=function(btn){
   const box=btn.closest("div");
   box.parentElement.querySelectorAll("input[type=checkbox]:checked").forEach(cb=>{
-    queueOne({url:cb.dataset.url,kind:"video",title:cb.dataset.title,format_id:"",format_note:"best"});
+    queueOne({url:cb.dataset.url,kind:"video",title:cb.dataset.title,format_id:"",format_note:"best",engine:"ytdlp"});
   });
 };
 async function queueOne(j){
@@ -287,7 +328,7 @@ window.jobAction=async(id,act)=>{try{await api("/api/jobs/"+id+"/"+act,{});refre
 $("clearBtn").onclick=async()=>{await api("/api/jobs/clear-finished",{});refreshJobs()};
 $("saveSettings").onclick=async()=>{
   try{await api("/api/settings",{out_dir:$("outDir").value.trim(),max_concurrent:parseInt($("maxC").value,10),
-      cookies_file:$("cookiesFile").value.trim()});
+      cookies_file:$("cookiesFile").value.trim(),api_base_url:$("apiUrl").value.trim()});
     setStatus("Settings saved.","ok");refreshStatus();}
   catch(e){setStatus(e.message,"err")}
 };

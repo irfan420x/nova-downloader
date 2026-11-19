@@ -156,3 +156,53 @@ func TestConcurrencyLimit(t *testing.T) {
 	}
 	close(release)
 }
+
+// Stream URLs and headers are in-memory only: they must NOT survive
+// a save/load round-trip (they expire, and headers carry session
+// cookies), while engine/platform must survive.
+func TestStreamFieldsNotPersisted(t *testing.T) {
+	dir := t.TempDir()
+	state := filepath.Join(dir, "jobs.json")
+	m := New(dir, 1, state, instantRunner)
+	j := m.Add(&Job{
+		URL: "https://www.tiktok.com/@x/video/1", Title: "vid", Kind: KindVideo,
+		Engine: "api", Platform: "tiktok", FormatID: "tiktok-720p",
+		StreamURL:     "https://v16-webapp-prime.us.tiktok.com/video.mp4",
+		StreamHeaders: map[string]string{"Cookie": "ttwid=secret"},
+		Alternates:    []string{"https://v19-webapp-prime.us.tiktok.com/video.mp4"},
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := m.Get(j.ID); got.Status == StatusDone {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	data, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stringContains(string(data), "ttwid=secret") || stringContains(string(data), "v16-webapp-prime") {
+		t.Fatal("stream URL / cookie header persisted to jobs.json — must stay in memory only")
+	}
+	m2 := New(dir, 1, state, instantRunner)
+	got := m2.Get(j.ID)
+	if got == nil {
+		t.Fatal("job not restored")
+	}
+	if got.Engine != "api" || got.Platform != "tiktok" || got.FormatID != "tiktok-720p" {
+		t.Fatalf("engine/platform lost on reload: %+v", got)
+	}
+	if got.StreamURL != "" || got.StreamHeaders != nil || len(got.Alternates) != 0 {
+		t.Fatalf("stream fields survived reload: %+v", got)
+	}
+}
+
+func stringContains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

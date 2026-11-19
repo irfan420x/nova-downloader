@@ -65,6 +65,25 @@ type Job struct {
 	ETA        string    `json:"eta"`
 	Error      string    `json:"error"`
 	CreatedAt  time.Time `json:"created_at"`
+	// Engine is how the job was resolved: "api" (NOVA API), "ytdlp"
+	// (fallback), "file" (direct download). "" on old saved jobs
+	// means the legacy yt-dlp video path.
+	Engine   string `json:"engine"`
+	Platform string `json:"platform"`
+	// Resolved stream data — in-memory ONLY, never persisted:
+	// stream URLs expire within minutes/hours, and headers carry
+	// short-lived session cookies. A job resumed after a restart
+	// re-resolves its page URL fresh instead of trusting stale data.
+	StreamURL          string            `json:"-"`
+	StreamHeaders      map[string]string `json:"-"`
+	StreamExt          string            `json:"-"`
+	Alternates         []string          `json:"-"`
+	AudioStreamURL     string            `json:"-"`
+	AudioStreamHeaders map[string]string `json:"-"`
+	AudioStreamExt     string            `json:"-"`
+	// Merged is set when the chosen quality is video-only and the
+	// runner should also fetch the audio stream and merge with ffmpeg.
+	Merged bool `json:"merged"`
 
 	cancel context.CancelFunc `json:"-"`
 	done   chan struct{}      `json:"-"`

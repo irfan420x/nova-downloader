@@ -4,7 +4,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p dist
-VERSION="${VERSION:-1.1.0}"
+VERSION="${VERSION:-1.2.0}"
 build() {
   GOOS="$1" GOARCH="$2" SUFFIX="$3"
   OUT="dist/nova-downloader-$VERSION-$SUFFIX"

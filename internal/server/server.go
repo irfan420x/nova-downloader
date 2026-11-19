@@ -16,10 +16,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/irfan420x/nova-downloader/internal/detect"
 	"github.com/irfan420x/nova-downloader/internal/engine"
 	"github.com/irfan420x/nova-downloader/internal/httpdl"
+	"github.com/irfan420x/nova-downloader/internal/novaapi"
 	"github.com/irfan420x/nova-downloader/internal/queue"
 	"github.com/irfan420x/nova-downloader/internal/yt"
 )
@@ -34,6 +36,9 @@ type Settings struct {
 	// CookiesFile is an optional cookies.txt for yt-dlp (exported from
 	// the browser) — needed when YouTube shows its bot check.
 	CookiesFile string `json:"cookies_file"`
+	// ApiBaseURL is the NOVA Downloader API used as the primary
+	// resolve engine. "" means the production default.
+	ApiBaseURL string `json:"api_base_url"`
 }
 
 // Server wires the queue manager, engine and HTTP handlers.
@@ -42,11 +47,17 @@ type Server struct {
 	settings Settings
 	mu       sync.Mutex
 	dataDir  string
+	api      *novaapi.Client
+	// apiHealth caches the last /api/health result (checked at most
+	// once a minute — the UI polls /api/status every 10s).
+	apiHealthOK  bool
+	apiHealthErr string
+	apiHealthAt  time.Time
 }
 
 // New builds a Server. settingsPath is the JSON file for settings.
 func New(mgr *queue.Manager, settings Settings, dataDir string) *Server {
-	return &Server{mgr: mgr, settings: settings, dataDir: dataDir}
+	return &Server{mgr: mgr, settings: settings, dataDir: dataDir, api: novaapi.NewClient(settings.ApiBaseURL)}
 }
 
 // DefaultDownloadDir is ~/Downloads/NOVA (NOVA family convention).
@@ -60,7 +71,7 @@ func DefaultDownloadDir() string {
 
 // LoadSettings reads settings.json, falling back to defaults.
 func LoadSettings(dataDir string) Settings {
-	s := Settings{OutDir: DefaultDownloadDir(), MaxConcurrent: 2}
+	s := Settings{OutDir: DefaultDownloadDir(), MaxConcurrent: 2, ApiBaseURL: novaapi.DefaultBaseURL}
 	data, err := os.ReadFile(filepath.Join(dataDir, "settings.json"))
 	if err != nil {
 		return s
@@ -78,6 +89,9 @@ func LoadSettings(dataDir string) Settings {
 	if loaded.CookiesFile != "" {
 		s.CookiesFile = loaded.CookiesFile
 	}
+	if loaded.ApiBaseURL != "" {
+		s.ApiBaseURL = loaded.ApiBaseURL
+	}
 	return s
 }
 
@@ -92,12 +106,18 @@ func (s *Server) saveSettings() {
 	_ = os.WriteFile(filepath.Join(s.dataDir, "settings.json"), data, 0o644)
 }
 
-// Runner executes one queued job: yt-dlp for video, plain HTTP for files.
+// Runner executes one queued job: the NOVA API for API-resolved
+// jobs, yt-dlp for fallback video, plain HTTP for files.
 // It reads the cookies file from the current settings on every call.
 func (s *Server) Runner(ctx context.Context, j *queue.Job, report func(queue.Progress)) error {
 	s.mu.Lock()
 	cookies := s.settings.CookiesFile
 	s.mu.Unlock()
+	// API-resolved jobs (video or file) go through the API runner,
+	// which downloads the resolved stream with its headers.
+	if j.Engine == "api" {
+		return s.runAPIJob(ctx, j, report)
+	}
 	if j.Kind == queue.KindVideo {
 		ytPath := engine.Find()
 		if ytPath == "" {
@@ -195,6 +215,32 @@ type statusResp struct {
 	MaxConcurrent int    `json:"max_concurrent"`
 	Jobs          int    `json:"jobs"`
 	Active        int    `json:"active"`
+	APIURL        string `json:"api_url"`
+	APIOK         bool   `json:"api_ok"`
+	APIErr        string `json:"api_error,omitempty"`
+}
+
+// apiHealth returns the cached API health (rechecked at most once a
+// minute so the UI's 10s status poll doesn't hammer the API).
+func (s *Server) apiHealth() (bool, string) {
+	s.mu.Lock()
+	if !s.apiHealthAt.IsZero() && time.Since(s.apiHealthAt) < time.Minute {
+		ok, errStr := s.apiHealthOK, s.apiHealthErr
+		s.mu.Unlock()
+		return ok, errStr
+	}
+	s.mu.Unlock()
+	err := s.api.Health(context.Background())
+	s.mu.Lock()
+	s.apiHealthAt = time.Now()
+	if err != nil {
+		s.apiHealthOK, s.apiHealthErr = false, err.Error()
+	} else {
+		s.apiHealthOK, s.apiHealthErr = true, ""
+	}
+	ok, errStr := s.apiHealthOK, s.apiHealthErr
+	s.mu.Unlock()
+	return ok, errStr
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -211,12 +257,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	outDir, maxC := s.settings.OutDir, s.settings.MaxConcurrent
+	apiURL := s.settings.ApiBaseURL
 	s.mu.Unlock()
+	apiOK, apiErr := s.apiHealth()
 	writeJSON(w, http.StatusOK, statusResp{
 		EnginePath: ytPath, EngineVersion: ver,
 		FFmpeg: engine.FFmpeg() != "",
 		OutDir: outDir, MaxConcurrent: maxC,
 		Jobs: len(s.mgr.List()), Active: active,
+		APIURL: apiURL, APIOK: apiOK, APIErr: apiErr,
 	})
 }
 
@@ -225,7 +274,9 @@ type probeReq struct {
 }
 
 type probeResp struct {
-	Kind       string             `json:"kind"` // video | file | playlist
+	Kind       string             `json:"kind"`   // video | file | playlist
+	Engine     string             `json:"engine"` // "api" | "ytdlp" | "file"
+	Platform   string             `json:"platform,omitempty"`
 	Title      string             `json:"title"`
 	Uploader   string             `json:"uploader"`
 	Thumbnail  string             `json:"thumbnail"`
@@ -238,6 +289,12 @@ type probeResp struct {
 	VideoOnly  []yt.Format        `json:"video_only,omitempty"`
 	AudioOnly  []yt.Format        `json:"audio_only,omitempty"`
 	Entries    []yt.PlaylistEntry `json:"entries,omitempty"`
+	// SubtitlesSupported is false for API probes (the API returns no
+	// subtitles) and true for yt-dlp probes.
+	SubtitlesSupported bool `json:"subtitles_supported"`
+	// Streams carries the API stream data for file probes (the single
+	// direct-file quality), so the UI can queue it with headers.
+	Streams []yt.Format `json:"streams,omitempty"`
 }
 
 func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
@@ -305,10 +362,41 @@ func withProbeHint(err error) error {
 }
 
 func (s *Server) probeURL(ctx context.Context, rawURL string) (*probeResp, error) {
+	// Playlists / channels are not API territory — the API resolves
+	// single videos. yt-dlp keeps playlist support working.
+	if novaapi.IsPlaylistURL(rawURL) {
+		return s.probeYTDLP(ctx, rawURL)
+	}
+	platform := novaapi.DetectPlatform(rawURL)
+	switch {
+	case platform != novaapi.PlatformDirect:
+		// A platform the API covers (YouTube, TikTok, Facebook, X,
+		// SoundCloud, HLS) — resolve through the API. No yt-dlp
+		// for these, even when the API call fails: the API's
+		// honest error is the answer.
+		return s.apiProbe(ctx, rawURL)
+	case novaapi.IsFallbackHost(rawURL):
+		// A video site with no API endpoint — yt-dlp fallback.
+		return s.probeYTDLP(ctx, rawURL)
+	default:
+		// Unknown host: HEAD it. A direct file goes to the API
+		// /direct endpoint (local fallback when the API is
+		// unreachable); an HTML page goes to the yt-dlp probe,
+		// which supports 1000+ sites.
+		kind, head, _ := detect.Classify(rawURL)
+		if kind == detect.KindFile && head != nil {
+			return s.probeDirectFile(ctx, rawURL, head)
+		}
+		return s.probeYTDLP(ctx, rawURL)
+	}
+}
+
+// probeYTDLP is the original yt-dlp probe path (fallback engine).
+func (s *Server) probeYTDLP(ctx context.Context, rawURL string) (*probeResp, error) {
 	kind, head, _ := detect.Classify(rawURL)
 	if kind == detect.KindFile && head != nil {
 		return &probeResp{
-			Kind: "file", URL: rawURL,
+			Kind: "file", Engine: "file", URL: rawURL,
 			Title: head.Filename, Filename: head.Filename,
 			Size: head.Size, ContentTyp: head.ContentType,
 		}, nil
@@ -328,7 +416,7 @@ func (s *Server) probeURL(ctx context.Context, rawURL string) (*probeResp, error
 			ct := strings.ToLower(head.ContentType)
 			if !strings.HasPrefix(ct, "text/html") && ct != "" {
 				return &probeResp{
-					Kind: "file", URL: rawURL,
+					Kind: "file", Engine: "file", URL: rawURL,
 					Title: head.Filename, Filename: head.Filename,
 					Size: head.Size, ContentTyp: head.ContentType,
 				}, nil
@@ -338,9 +426,10 @@ func (s *Server) probeURL(ctx context.Context, rawURL string) (*probeResp, error
 	}
 	if info.IsPlaylist() {
 		return &probeResp{
-			Kind: "playlist", URL: rawURL,
+			Kind: "playlist", Engine: "ytdlp", URL: rawURL,
 			Title: info.Title, Uploader: info.Uploader,
 			Thumbnail: info.Thumbnail, Entries: info.Entries,
+			SubtitlesSupported: true,
 		}, nil
 	}
 	dur := 0.0
@@ -354,12 +443,13 @@ func (s *Server) probeURL(ctx context.Context, rawURL string) (*probeResp, error
 		combined = info.MergedOptions()
 	}
 	return &probeResp{
-		Kind: "video", URL: rawURL,
+		Kind: "video", Engine: "ytdlp", URL: rawURL,
 		Title: info.Title, Uploader: info.Uploader,
 		Thumbnail: info.Thumbnail, Duration: dur,
-		Combined:  combined,
-		VideoOnly: info.VideoOnlyFormats(),
-		AudioOnly: info.AudioOnlyFormats(),
+		Combined:           combined,
+		VideoOnly:          info.VideoOnlyFormats(),
+		AudioOnly:          info.AudioOnlyFormats(),
+		SubtitlesSupported: true,
 	}, nil
 }
 
@@ -412,6 +502,18 @@ type queueReq struct {
 	AudioOnly  bool   `json:"audio_only"`
 	Subtitles  bool   `json:"subtitles"`
 	SubLangs   string `json:"sub_langs"`
+	// API-resolved stream (engine "api" only). In-memory only —
+	// the queue never persists stream URLs or headers.
+	Engine             string            `json:"engine"`
+	Platform           string            `json:"platform"`
+	StreamURL          string            `json:"stream_url"`
+	StreamHeaders      map[string]string `json:"stream_headers"`
+	StreamExt          string            `json:"stream_ext"`
+	Alternates         []string          `json:"alternates"`
+	AudioStreamURL     string            `json:"audio_stream_url"`
+	AudioStreamHeaders map[string]string `json:"audio_stream_headers"`
+	AudioStreamExt     string            `json:"audio_stream_ext"`
+	Merged             bool              `json:"merged"`
 }
 
 func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
@@ -433,11 +535,25 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "file" {
 		kind = queue.KindFile
 	}
+	engineName := req.Engine
+	if engineName == "" {
+		// Legacy clients (and yt-dlp fallback probes) send no engine.
+		engineName = "ytdlp"
+		if kind == queue.KindFile {
+			engineName = "file"
+		}
+	}
 	j := &queue.Job{
 		URL: req.URL, Title: req.Title, Kind: kind,
 		FormatID: req.FormatID, FormatNote: req.FormatNote,
 		Filename: req.Filename, AudioOnly: req.AudioOnly,
 		Subtitles: req.Subtitles, SubLangs: req.SubLangs,
+		Engine: engineName, Platform: req.Platform,
+		StreamURL: req.StreamURL, StreamHeaders: req.StreamHeaders,
+		StreamExt: req.StreamExt, Alternates: req.Alternates,
+		AudioStreamURL:     req.AudioStreamURL,
+		AudioStreamHeaders: req.AudioStreamHeaders,
+		AudioStreamExt:     req.AudioStreamExt, Merged: req.Merged,
 	}
 	if j.Title == "" {
 		j.Title = j.Filename
@@ -529,6 +645,17 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			s.mu.Lock()
 			s.settings.CookiesFile = req.CookiesFile
+			s.mu.Unlock()
+		}
+		if req.ApiBaseURL != "" {
+			if !strings.HasPrefix(req.ApiBaseURL, "http://") && !strings.HasPrefix(req.ApiBaseURL, "https://") {
+				writeErr(w, http.StatusBadRequest, "API URL must start with http:// or https://")
+				return
+			}
+			s.mu.Lock()
+			s.settings.ApiBaseURL = strings.TrimRight(req.ApiBaseURL, "/")
+			s.api = novaapi.NewClient(s.settings.ApiBaseURL)
+			s.apiHealthAt = time.Time{} // force a fresh health check
 			s.mu.Unlock()
 		}
 		s.saveSettings()

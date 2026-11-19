@@ -20,7 +20,7 @@ import (
 	"github.com/irfan420x/nova-downloader/internal/server"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	port := flag.Int("port", 8765, "localhost port for the web UI")

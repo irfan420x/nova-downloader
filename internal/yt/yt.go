@@ -36,6 +36,12 @@ type Format struct {
 	TBR            *float64 `json:"tbr"`
 	FormatNote     string   `json:"format_note"`
 	Protocol       string   `json:"protocol"`
+	// Stream data — set only for NOVA API resolutions: the direct
+	// stream URL, the headers the CDN requires (Cookie / Referer /
+	// User-Agent), and alternate hosts for the same content.
+	StreamURL     string            `json:"stream_url,omitempty"`
+	StreamHeaders map[string]string `json:"stream_headers,omitempty"`
+	Alternates    []string          `json:"alternates,omitempty"`
 }
 
 // Size returns the best-known byte size, or 0 when unknown.

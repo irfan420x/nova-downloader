@@ -10,56 +10,62 @@ no ads, no trackers, no account.
 
 ## What it does
 
-- **Any public link** — YouTube, Vimeo, TikTok, Instagram, SoundCloud and
-  1000+ other sites (via yt-dlp), plus any direct file / image / document
-  link (built-in HTTP downloader).
+- **Any public link** — YouTube, TikTok, Facebook, X and SoundCloud
+  resolve through the **NOVA API** (one central API for the NOVA
+  desktop + mobile downloaders); Instagram, Pinterest and 1000+ other
+  sites work through the **yt-dlp fallback**, plus any direct file /
+  image / document link (built-in HTTP downloader).
 - **All qualities at download time** — paste a video link and pick from
-  every available quality (2160p down to 144p, plus video-only and
-  audio-only streams). Modern YouTube ships no single-file formats, so the
-  app builds merged video+audio options per quality and merges them for you.
+  every available quality. Video-only picks are merged with the best
+  audio automatically when ffmpeg is available.
 - **Per-quality download** — the file you get is exactly the quality you
-  picked, in mp4.
-- **Pause / resume** — video downloads resume with `--continue`, direct
-  downloads resume with HTTP Range. Unfinished jobs survive a restart.
+  picked, in mp4 (or mkv when the streams need it).
+- **Pause / resume** — API downloads resume with HTTP Range (trying
+  alternate CDN hosts when one fails); direct downloads resume the
+  same way. Unfinished jobs survive a restart and re-resolve fresh
+  (stream URLs expire, so nothing stale is trusted).
 - **Batch / queue** — paste up to 50 links at once, queue them, run 2 at a
   time (configurable).
 - **Format choice** — mp4 video, or audio-only mp3 (needs ffmpeg).
-- **Subtitles** — download subtitles alongside the video (en + bn by default).
-- **Playlists** — paste a playlist, tick the videos you want, queue them all.
+- **Subtitles** — download subtitles alongside the video (en + bn by default;
+  yt-dlp fallback links only — the API returns no subtitles).
+- **Playlists** — paste a playlist, tick the videos you want, queue them all
+  (yt-dlp fallback).
 - **Clipboard auto-detect** — one click pastes from your clipboard.
 - **One-click engine install** — if yt-dlp is missing, the app downloads
   the official release for you. No terminal needed.
 - **YouTube bot-check?** — export a `cookies.txt` from your browser and
   point the app at it in Settings; yt-dlp then downloads as you.
 - **Private by design** — the UI is a page served on `127.0.0.1` only.
-  Nothing leaves your machine except the downloads you ask for.
+  Nothing leaves your machine except the downloads you ask for (and the
+  API resolve calls for the links you paste).
 
 ## Platforms
 
-Tested 2026-11-19 with yt-dlp 2026.10.26. Results can vary by network and
-IP — a site that fails here may work from your connection, and engine
-updates can change this table. Update yt-dlp from Settings for the newest
-extractors.
+Two engines, and the UI always labels which one resolved each link:
 
-| Platform | Status |
-| --- | --- |
-| YouTube | ✅ Works (bot-check is intermittent from datacentre IPs — `cookies.txt` in Settings fixes it) |
-| TikTok | ✅ Works |
-| Instagram | ✅ Works |
-| Facebook | ✅ Works (reels serve a single format, so quality choice is limited) |
-| X / Twitter | ✅ Works |
-| SoundCloud | ✅ Works |
-| Pinterest | ✅ Works |
-| Vimeo | 🔒 Needs login — public videos currently ask for `cookies.txt` in Settings |
-| Dailymotion | ⚠️ IP-dependent — failed from this network ("Remote end closed connection without response") |
-| Twitch | ⚠️ IP-dependent — failed from this network |
-| Reddit | ⚠️ IP-dependent — truncated responses from this network |
-| Threads | ❌ Not supported by the engine yet — no Threads extractor in yt-dlp 2026.10.26 ("Unsupported URL") |
+| Platform | Engine | Status |
+| --- | --- | --- |
+| YouTube | NOVA API | ✅ Works — 27 qualities (combined + video/audio-only) |
+| TikTok | NOVA API | ✅ Works — 3 qualities, session cookies + Referer handled |
+| Facebook | NOVA API | ✅ Works — 6 qualities (combined + DASH video/audio) |
+| X / Twitter | NOVA API | ✅ Works — 5 qualities |
+| SoundCloud | NOVA API | ✅ Works — HLS transcodings (ffmpeg or built-in HLS) |
+| Direct file | NOVA API | ✅ Works (falls back to local download if the API is unreachable) |
+| HLS (.m3u8) | NOVA API | ✅ Works — best variant, ffmpeg or built-in segment download |
+| Instagram | yt-dlp fallback | ✅ Works (probe 2026-11-19) |
+| Pinterest | yt-dlp fallback | ✅ Works (probe 2026-11-19) |
+| Vimeo | yt-dlp fallback | 🔒 Needs login — public videos currently ask for `cookies.txt` in Settings |
+| Dailymotion | yt-dlp fallback | ⚠️ IP-dependent — failed from this network |
+| Twitch | yt-dlp fallback | ⚠️ IP-dependent — failed from this network |
+| Reddit | yt-dlp fallback | ⚠️ IP-dependent — truncated responses from this network |
+| Threads | yt-dlp fallback | ❌ Not supported by the engine yet — no Threads extractor in yt-dlp 2026.10.26 |
 
 Any other public link still goes through yt-dlp's 1000+ supported sites,
 plus any direct file / image / document link via the built-in downloader.
-When a probe fails, the app now shows a short hint with the error
-(login / network / unsupported) telling you what to try next.
+When a probe fails, the app shows the API's (or yt-dlp's) honest error.
+The API's first call after idle can take up to ~a minute (cold start);
+the UI says so instead of failing fast.
 
 ## Install
 
@@ -115,53 +121,62 @@ next start.
 ## How it works
 
 ```
-paste link ──▶ classify ──▶ video site? ──▶ yt-dlp -J ──▶ quality picker
-                         └─▶ direct file? ──▶ HEAD ──▶ direct download
-queue ──▶ worker (max 2) ──▶ yt-dlp --continue / HTTP Range resume
+paste link ──▶ platform? ──▶ NOVA API ──▶ quality picker ──▶ direct CDN download
+                         ├─▶ direct file? ──▶ API /direct ──▶ direct download
+                         └─▶ other video site? ──▶ yt-dlp -J ──▶ quality picker
+queue ──▶ worker (max 2) ──▶ HTTP Range resume (+ alternate hosts) / yt-dlp --continue
 ```
 
-- **Video:** `yt-dlp` does extraction and download. The app never
-  scrapes video pages itself.
+- **Video (API platforms):** the NOVA API resolves the link into stream
+  URLs + the headers each CDN requires (Cookie / Referer / User-Agent).
+  The app downloads the bytes straight from the CDN — no video bytes
+  ever pass through the API. Video-only picks merge with the best audio
+  via ffmpeg when available.
+- **Video (fallback):** `yt-dlp` does extraction and download, as before.
 - **Files:** a built-in Go HTTP downloader with `Range` resume and
-  `.part` files.
+  `.part` files. HLS streams download via ffmpeg when available, else a
+  built-in segment downloader.
 - **UI:** a single-page web UI served by the Go binary on localhost.
   No Node, no Electron, no CGO — the whole app is one ~11 MB binary.
 - **Stdlib only:** the Go code uses no third-party packages.
+- **API URL:** Settings → API URL (default
+  `https://nova-downloader-api.vercel.app`; point it at your own
+  self-hosted API if you run one).
 
-## Verified (v1.1.0, 2026-11-19, on Linux)
+## Verified (v1.2.0, 2026-11-19, on Linux)
 
-Unit + race tests: `go test -race ./...` — all packages pass.
+Unit tests: `go test ./...` — all packages pass (incl. API client,
+header/alternate handling, HLS, stream-field non-persistence).
 
-Platform probe (12 sites, yt-dlp 2026.10.26, this VM): 7 work —
-YouTube, TikTok, Instagram, Facebook, X, SoundCloud, Pinterest. Vimeo
-needs login/cookies. Dailymotion, Twitch and Reddit fail from this
-network (transport / truncated responses). Threads has no extractor in
-the engine yet ("Unsupported URL"). Full report:
-`platform-probe-2026-11-19.md`.
-
-Live, against the real app:
+Live, against the real app (API + real links, this VM):
 
 | Check | Result |
 | --- | --- |
-| Platform probe (12 sites) | ✅ 7 work, 1 needs login, 3 IP-dependent, 1 unsupported by engine |
-| TikTok end-to-end download | ✅ 4,452,152 B mp4 in ~3 s, valid MP4 |
-| Vimeo probe error hint | ✅ error now carries "Hint: this site needs login — add your cookies.txt in Settings and try again." |
+| TikTok resolve + download | ✅ API, 3 qualities, 3,143,526 B mp4 |
+| YouTube resolve + download (360p combined) | ✅ API, 27 qualities, 11,829,048 B mp4 |
+| YouTube 2160p video+audio merge | ✅ API, 362,085,559 B .mkv (VP9 3840×2160 + AAC) |
+| YouTube mp3 | ✅ API, 5,065,075 B MP3 |
+| Facebook resolve + download | ✅ API, 6 qualities, 3,034,344 B mp4 |
+| X resolve + download (2160p) | ✅ API, 5 qualities, 110,014,999 B mp4 |
+| SoundCloud resolve + download (aac 160k) | ✅ API, 2 audio-only, 4,514,880 B .m4s |
+| Direct file resolve + download | ✅ API, 8,612 B, byte-identical |
+| HLS resolve + download (Mux test stream, 720p) | ✅ API, 5 qualities, 177,374,616 B .ts |
+| Instagram (yt-dlp fallback) | ✅ yt-dlp, 2,554,214 B mp4 |
 
-Unit + race tests: `go test -race ./...` — all packages pass.
+Notes from the live run: the YouTube 360p stream is truncated at
+random points by this VM's network (curl gets a different short size
+on every try of the same URL) — the downloader retries each
+candidate up to 6 times, resuming from the `.part` file, and the job
+also resumed correctly across a server restart. The HLS stream is
+downloaded by the built-in segment downloader (ffmpeg 8.1.2's HLS
+demuxer rejects this stream's segments on this VM); output takes
+the segment container's extension (`.ts`).
 
-Live, against the real app:
-
-| Check | Result |
-| --- | --- |
-| YouTube probe (Big Buck Bunny 4K) | 8 merged qualities 2160p–144p, 22 video-only, 5 audio-only |
-| Video download, 360p merged | ✅ 25,581,772 B mp4 — ffprobe: AV1 640×360 + Opus, 634.6 s |
-| Direct file download | ✅ byte-identical (md5 match) |
-| Pause / resume (70 MB file) | ✅ paused at 0.5%, resumed, sha256 match |
-| MP3 audio extraction | ✅ real MP3, 634.6 s |
-| Batch probe (video + file) | ✅ 2 results, 0 errors |
-| Playlist probe | ✅ 31 entries with titles; first entry downloaded fine |
-| Engine one-click install | ✅ downloaded 3,073,072 B, version 2026.10.26 |
-| Cross-build | ✅ Windows, macOS arm64/amd64, Linux arm64 |
+Older live checks (v1.1.0, yt-dlp engine): TikTok end-to-end
+4,452,152 B mp4; YouTube 360p merged 25,581,772 B; direct file
+byte-identical; pause/resume sha256 match; mp3 extraction; batch
+probe; playlist probe (31 entries); engine one-click install;
+cross-build (Windows, macOS arm64/amd64, Linux arm64).
 
 Not verified live yet (code present, needs a real-world case):
 
@@ -172,10 +187,8 @@ Not verified live yet (code present, needs a real-world case):
 
 Known behaviours:
 
-- YouTube intermittently shows a bot check from datacentre IPs
-  ("Sign in to confirm you're not a bot"). The app surfaces yt-dlp's
-  real error and retries work after a minute; a `cookies.txt` fixes it
-  properly.
+- The API's first call after idle can take up to ~a minute (cold
+  start); the UI says so instead of failing fast.
 - Merged downloads report progress per stream (video, then audio) —
   the percentage restarts between the two parts, then jumps to 100%.
 
